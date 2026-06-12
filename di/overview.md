@@ -667,6 +667,280 @@ class MyViewModel(
 }
 ```
 
+## Configuración de Koin
+
+### PasswordManagerApplication
+
+**Archivo**: `PasswordManagerApplication.kt`
+
+```kotlin
+class PasswordManagerApplication : Application() {
+    
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+        
+        // Iniciar Koin
+        startKoin()
+    }
+    
+    private fun startKoin() {
+        KoinApplication.init()
+        
+        startKoin {
+            androidContext(this@PasswordManagerApplication)
+            modules(appModule)
+        }
+        
+        // Obtener AutoLockManager después de que Koin esté listo
+        val autoLockManager = koin.get<AutoLockManager>()
+        autoLockManager.initialize()
+    }
+    
+    companion object {
+        lateinit var instance: PasswordManagerApplication private set
+    }
+}
+```
+
+**Flujo de Inicialización**:
+1. `Application.onCreate()` es llamado al iniciar la app
+2. Se inicializa Koin con `appModule`
+3. Se obtiene `AutoLockManager` del contenedor Koin
+4. Se llama a `autoLockManager.initialize()` para registrar lifecycle observer
+
+---
+
+## Inyección en Compose
+
+### koinViewModel()
+
+Para obtener ViewModels en composables:
+
+```kotlin
+@Composable
+fun PasswordListScreen(
+    onNavigateToDetail: (String) -> Unit,
+    onNavigateToCreate: () -> Unit,
+    onNavigateToEdit: (String) -> Unit
+) {
+    // Inyección automática desde Koin
+    val viewModel: PasswordListViewModel = koinViewModel()
+    
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    
+    // UI...
+}
+```
+
+### koinInjectable()
+
+Para otras dependencias en composables:
+
+```kotlin
+@Composable
+fun SomeScreen() {
+    val dataCipher: DataCipher = koinInjectable()
+    val settingsRepository: SettingsRepository = koinInjectable()
+    
+    // Usar dependencias...
+}
+```
+
+---
+
+## Árbol de Dependencias
+
+```
+appModule
+├── Security
+│   ├── KeystoreManager
+│   ├── PasswordDeriver
+│   ├── CipherManager
+│   ├── DataCipher
+│   ├── SecureStorage (context)
+│   └── BiometricAuthenticator
+│
+├── Database
+│   ├── PasswordDatabase (context)
+│   ├── PasswordEntryDao (de Database)
+│   ├── CategoryDao (de Database)
+│   └── SettingsDao (de Database)
+│
+├── DataStore
+│   └── dataStore (context)
+│
+├── Repositories
+│   ├── AuthRepository → AuthRepositoryImpl
+│   ├── PasswordRepository → PasswordRepositoryImpl
+│   ├── CategoryRepository → CategoryRepositoryImpl
+│   └── SettingsRepository → SettingsRepositoryImpl
+│
+├── Use Cases - Auth
+│   ├── SetupMasterPassword (AuthRepository)
+│   ├── AuthenticateUser (AuthRepository)
+│   └── ChangeMasterPassword (AuthRepository, PasswordRepository, CipherManager)
+│
+├── Use Cases - Password
+│   ├── GetAllPasswords (PasswordRepository)
+│   ├── GetPasswordById (PasswordRepository)
+│   ├── CreatePasswordEntry (PasswordRepository)
+│   ├── UpdatePasswordEntry (PasswordRepository)
+│   ├── DeletePasswordEntry (PasswordRepository)
+│   ├── SearchPasswords (PasswordRepository)
+│   ├── FilterPasswordsByCategory (PasswordRepository)
+│   ├── ToggleFavoriteEntry (PasswordRepository)
+│   └── GeneratePassword ()
+│
+├── Use Cases - Category
+│   ├── SeedPredefinedCategories (CategoryDao)
+│   ├── GetCategories (CategoryRepository)
+│   ├── CreateCategory (CategoryRepository)
+│   ├── UpdateCategory (CategoryRepository)
+│   └── DeleteCategory (CategoryRepository)
+│
+├── Use Cases - Settings
+│   ├── GetSettings (SettingsRepository)
+│   ├── UpdateSettings (SettingsRepository)
+│   ├── GetThemeMode (SettingsRepository)
+│   ├── SetThemeMode (SettingsRepository)
+│   ├── IsBiometricEnabled (SettingsRepository)
+│   ├── SetBiometricEnabled (SettingsRepository)
+│   ├── GetLockTimeout (SettingsRepository)
+│   └── SetLockTimeout (SettingsRepository)
+│
+├── Use Cases - Backup
+│   ├── ExportEncryptedBackup (PasswordRepository, CategoryRepository, DataCipher, AuthRepository, context)
+│   └── ImportFromCSV (PasswordRepository, context)
+│
+├── Use Cases - Audit/Statistics
+│   ├── AuditWeakPasswords (PasswordRepository)
+│   └── GetSecurityStatistics (PasswordRepository, CategoryRepository, AuditWeakPasswords)
+│
+├── ViewModels
+│   ├── AuthViewModel (SetupMasterPassword, AuthenticateUser, SeedPredefinedCategories, AuthRepository, AutoLockManager, application)
+│   ├── ChangePasswordViewModel (ChangeMasterPassword)
+│   ├── PasswordListViewModel (GetAllPasswords, DeletePasswordEntry, ToggleFavoriteEntry)
+│   ├── PasswordDetailViewModel (GetPasswordById, context)
+│   ├── PasswordFormViewModel (GetAllPasswords, CreatePasswordEntry, UpdatePasswordEntry, GetCategories, GeneratePassword)
+│   ├── PasswordGeneratorViewModel (GeneratePassword)
+│   ├── CategoryManagementViewModel (GetCategories, CreateCategory, UpdateCategory, DeleteCategory)
+│   ├── BackupViewModel (ExportEncryptedBackup, ImportFromCSV, application)
+│   ├── SettingsViewModel (GetSettings, UpdateSettings, SetLockTimeout, SetBiometricEnabled, SetThemeMode)
+│   ├── AuditViewModel (AuditWeakPasswords)
+│   └── StatisticsViewModel (GetSecurityStatistics)
+│
+└── Other
+    └── AutoLockManager (SettingsRepository)
+```
+
+---
+
+## Testing con Koin
+
+### Unit Tests con Koin
+
+```kotlin
+class PasswordListViewModelTest {
+    
+    private lateinit var koinApp: KoinApplication
+    private lateinit var viewModel: PasswordListViewModel
+    
+    @Before
+    fun setup() {
+        koinApp = startKoin {
+            modules(
+                module {
+                    // Mocks para testing
+                    single { mockk<GetAllPasswords>() }
+                    single { mockk<DeletePasswordEntry>() }
+                    single { mockk<ToggleFavoriteEntry>() }
+                    
+                    // ViewModel bajo test
+                    viewModel { PasswordListViewModel(get(), get(), get()) }
+                }
+            )
+        }
+        
+        viewModel = koinApp.koin.get()
+    }
+    
+    @After
+    fun teardown() {
+        koinApp.close()
+    }
+    
+    @Test
+    fun `should load passwords on init`() = runTest {
+        // Given
+        val mockPasswords = listOf(
+            PasswordEntry(id = "1", title = "Test", ...)
+        )
+        val flow = flowOf(mockPasswords)
+        every { get<GetAllPasswords>().invoke() } returns flow
+        
+        // When
+        viewModel // Inicializa
+        
+        // Then
+        val state = viewModel.state.value
+        assertEquals(mockPasswords, state.entries)
+    }
+}
+```
+
+### Koin para Tests de Instrumentación
+
+```kotlin
+@RunWith(AndroidJUnit4::class)
+class InstrumentationTest {
+    
+    @get:Rule
+    val koinRule = KoinAndroidRule {
+        modules(appModule)
+    }
+    
+    @Test
+    fun testDatabaseInjection() {
+        val database: PasswordDatabase = koinRule.koin.get()
+        assertNotNull(database)
+    }
+}
+```
+
+---
+
+## Consideraciones de Rendimiento
+
+### Single vs Factory
+
+```kotlin
+// ✅ SINGLE: Una instancia para toda la vida de la app
+single { PasswordDeriver() }  // Sin estado, seguro
+single { DataCipher() }       // Sin estado, seguro
+single { get<PasswordDatabase>().passwordEntryDao() }  // DAO es thread-safe
+
+// ✅ FACTORY (default): Nueva instancia cada vez
+// factory { SomeClassWithState() }
+
+// ⚠️ VIEWMODEL: Scoped al lifecycle
+viewModel { PasswordListViewModel(get(), get(), get()) }
+```
+
+### Lazy Injection
+
+```kotlin
+// Lazy: Se crea solo cuando se usa
+single { lazy { ExpensiveResource() } }
+
+// En el ViewModel
+class MyViewModel(private val resource: Lazy<ExpensiveResource>) : ViewModel() {
+    fun doSomething() {
+        resource.value.doWork()  // Se crea aquí
+    }
+}
+```
+
 ---
 
 **Documentación Relacionada:**

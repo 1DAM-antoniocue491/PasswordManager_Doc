@@ -1019,45 +1019,369 @@ fun NavGraph(
 }
 ```
 
+## Componentes UI Reutilizables
+
+### SearchBar
+
+**Archivo**: `components/SearchBar.kt`
+
+Barra de búsqueda reutilizable con icono y botón de limpiar.
+
+```kotlin
+@Composable
+fun SearchBar(
+    query: String,
+    onQueryChanged: (String) -> Unit,
+    placeholder: String = "Buscar...",
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChanged,
+        placeholder = { Text(placeholder) },
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChanged("") }) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Limpiar búsqueda",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        singleLine = true,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+        ),
+        modifier = modifier.fillMaxWidth()
+    )
+}
+```
+
+**Características**:
+- Icono de búsqueda a la izquierda
+- Botón de limpiar (X) que aparece solo cuando hay texto
+- Bordes dinámicos con el tema (primary cuando enfocado)
+- Una sola línea de texto
+- Ocupa todo el ancho disponible
+
+**Uso**:
+```kotlin
+var searchQuery by remember { mutableStateOf("") }
+
+SearchBar(
+    query = searchQuery,
+    onQueryChanged = { searchQuery = it },
+    placeholder = "Buscar contraseñas..."
+)
+```
+
+---
+
+### CategoryPicker
+
+**Archivo**: `components/CategoryPicker.kt`
+
+Selector de categorías en formato grid con soporte para crear nuevas.
+
+```kotlin
+@Composable
+fun CategoryPicker(
+    categories: List<Category>,
+    selectedCategory: Category?,
+    onCategorySelected: (Category) -> Unit,
+    onDismissRequest: () -> Unit,
+    onCreateCategory: ((String, Int, String) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    var showNewCategoryDialog by remember { mutableStateOf(false) }
+    
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = { Text("Seleccionar categoría") },
+        text = {
+            LazyVerticalGrid(columns = GridCells.Fixed(3)) {
+                items(categories.size) { index ->
+                    CategoryItem(
+                        category = categories[index],
+                        isSelected = selectedCategory?.id == categories[index].id,
+                        onClick = { onCategorySelected(categories[index]) }
+                    )
+                }
+                if (onCreateCategory != null) {
+                    item { AddCategoryItem(onClick = { showNewCategoryDialog = true }) }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismissRequest) { Text("Cancelar") }
+        }
+    )
+}
+```
+
+**Características**:
+- Grid de 3 columnas
+- Cada categoría muestra color + icono + nombre
+- Indicador visual de selección (borde primary)
+- Botón "Nueva" para añadir categoría personalizada
+- Dialog secundario para crear nueva categoría con selector de color
+
+**Estructura del Item**:
+```kotlin
+@Composable
+private fun CategoryItem(
+    category: Category,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // Círculo de color con icono
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .background(Color(category.color), CircleShape)
+                .then(if (isSelected) Modifier.padding(2.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape) 
+                    else Modifier)
+        ) {
+            Icon(imageVector = Icons.Default.Star, tint = Color.White)
+        }
+        Text(text = category.name, style = MaterialTheme.typography.labelSmall)
+    }
+}
+```
+
+---
+
+### CategoryDropdown
+
+**Archivo**: `components/CategoryPicker.kt`
+
+Versión simplificada como dropdown para formularios.
+
+```kotlin
+@Composable
+fun CategoryDropdown(
+    categories: List<Category>,
+    selectedCategory: Category?,
+    onCategorySelected: (Category) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded }
+    ) {
+        OutlinedTextField(
+            value = selectedCategory?.name ?: "",
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Categoría") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+        
+        ExposedDropdownMenu(expanded, { expanded = false }) {
+            categories.forEach { category ->
+                DropdownMenuItem(
+                    text = {
+                        Row {
+                            Box(modifier = Modifier.size(16.dp)
+                                .background(Color(category.color), CircleShape))
+                            Text(category.name)
+                        }
+                    },
+                    onClick = {
+                        onCategorySelected(category)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+```
+
+**Uso típico**:
+```kotlin
+CategoryDropdown(
+    categories = categories,
+    selectedCategory = selectedCategory,
+    onCategorySelected = { category ->
+        viewModel.onCategorySelected(category)
+    }
+)
+```
+
+---
+
+### ColorPickerDialog
+
+**Archivo**: `components/ColorPickerDialog.kt`
+
+Dialog para seleccionar color de una paleta predefinida.
+
+```kotlin
+@Composable
+fun ColorPickerDialog(
+    currentColor: Int,
+    onColorSelected: (Int) -> Unit,
+    onDismissRequest: () -> Unit
+) {
+    var selectedColor by remember { mutableStateOf(currentColor) }
+    
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        title = { Text("Seleccionar color") },
+        text = {
+            Column {
+                // Vista previa
+                Row {
+                    Text("Color seleccionado:")
+                    Box(modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(Color(selectedColor)))
+                    Text("#${selectedColor.toString(16).uppercase()}")
+                }
+                
+                // Grid de colores (6 columnas)
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(6),
+                    modifier = Modifier.height(200.dp)
+                ) {
+                    items(paletteColors.size) { index ->
+                        Box(modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(paletteColors[index]))
+                            .clickable { selectedColor = paletteColors[index] }
+                            .then(if (selectedColor == paletteColors[index])
+                                Modifier.padding(3.dp)
+                                    .background(MaterialTheme.colorScheme.onSurface, CircleShape)
+                                else Modifier))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { 
+                onColorSelected(selectedColor)
+                onDismissRequest()
+            }) { Text("Aceptar") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismissRequest) { Text("Cancelar") }
+        }
+    )
+}
+```
+
+**Paleta de Colores** (28 colores):
+| Grupo | Colores (HEX) |
+|-------|---------------|
+| Rojos | #E74C3C, #C0392B, #EA4335 |
+| Naranjas | #F39C12, #E67E22, #D35400 |
+| Amarillos | #F1C40F, #FECA57, #FF9F43 |
+| Verdes | #27AE60, #2ECC71, #1ABC9C |
+| Azules | #3498DB, #2980B9, #4267B2, #5DADE2 |
+| Morados | #8E44AD, #9B59B6, #A569BD |
+| Rosas | #E91E63, #FF4081, #FF69B4 |
+| Grises | #95A5A6, #7F8C8D, #BDC3C7, #34495E |
+| Extra | #000000, #FFFFFF |
+
+---
+
 ## Tema (Material 3)
 
 ### Color.kt
 
+Documentación completa de colores y esquema de la aplicación.
+
+**Archivo**: `Color.kt`
+
+#### Colores del Tema Material 3
+
 ```kotlin
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// Tema Oscuro (Dark Theme)
+val Purple80 = Color(0xFFD0BCFF)      // Primary Dark
+val PurpleGrey80 = Color(0xFFCCC2DC)  // Secondary Dark
+val Pink80 = Color(0xFFEFB8C8)        // Tertiary Dark
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+// Tema Claro (Light Theme)
+val Purple40 = Color(0xFF6650a4)      // Primary Light
+val PurpleGrey40 = Color(0xFF625b71)  // Secondary Light
+val Pink40 = Color(0xFF7D5260)        // Tertiary Light
 
-// Colores personalizados para la app
-val PasswordManagerPrimary = Color(0xFF2196F3)
-val PasswordManagerSecondary = Color(0xFF03DAC6)
-val PasswordManagerError = Color(0xFFB00020)
+// Colores de estado
+val Red40 = Color(0xFFB3261E)         // Error
+val Red80 = Color(0xFFF2B8B5)         // Error Dark
+```
+
+#### Esquema de Colores Completo
+
+```kotlin
+private val DarkColorScheme = darkColorScheme(
+    primary = Purple80,
+    secondary = PurpleGrey80,
+    tertiary = Pink80,
+    error = Red80,
+    background = Color(0xFF1C1B1F),
+    surface = Color(0xFF1C1B1F),
+    onPrimary = Color(0xFF381E72),
+    onSecondary = Color(0xFF332D41),
+    onTertiary = Color(0xFF3D111B),
+    onError = Color(0xFF690005),
+    onBackground = Color(0xFFE6E1E5),
+    onSurface = Color(0xFFE6E1E5)
+)
+
+private val LightColorScheme = lightColorScheme(
+    primary = Purple40,
+    secondary = PurpleGrey40,
+    tertiary = Pink40,
+    error = Red40,
+    background = Color(0xFFFFFBFE),
+    surface = Color(0xFFFFFBFE),
+    onPrimary = Color(0xFFFFFFFF),
+    onSecondary = Color(0xFFFFFFFF),
+    onTertiary = Color(0xFFFFFFFF),
+    onError = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF1C1B1F),
+    onSurface = Color(0xFF1C1B1F)
+)
 ```
 
 ### Theme.kt
+
+**Archivo**: `Theme.kt`
 
 ```kotlin
 @Composable
 fun PasswordManagerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) {
-        darkColorScheme(
-            primary = Purple80,
-            secondary = PurpleGrey80,
-            tertiary = Pink80
-        )
-    } else {
-        lightColorScheme(
-            primary = Purple40,
-            secondary = PurpleGrey40,
-            tertiary = Pink40
-        )
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context)
+            else dynamicLightColorScheme(context)
+        }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
     }
     
     MaterialTheme(
@@ -1067,6 +1391,1231 @@ fun PasswordManagerTheme(
     )
 }
 ```
+
+**Características**:
+- `darkTheme`: Detecta automáticamente el tema del sistema
+- `dynamicColor`: Usa colores dinámicos de Material You (Android 12+)
+- Compatible con Android 8.0 (API 26) en adelante
+
+### Type.kt
+
+**Archivo**: `Type.kt`
+
+```kotlin
+val Typography = Typography(
+    displayLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 57.sp,
+        lineHeight = 64.sp,
+        letterSpacing = (-0.25).sp
+    ),
+    displayMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 45.sp,
+        lineHeight = 52.sp,
+        letterSpacing = 0.sp
+    ),
+    displaySmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 36.sp,
+        lineHeight = 44.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 32.sp,
+        lineHeight = 40.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 28.sp,
+        lineHeight = 36.sp,
+        letterSpacing = 0.sp
+    ),
+    headlineSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
+        letterSpacing = 0.sp
+    ),
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+        letterSpacing = 0.sp
+    ),
+    titleMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.15.sp
+    ),
+    titleSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp
+    ),
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.5.sp
+    ),
+    bodyMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.25.sp
+    ),
+    bodySmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.4.sp
+    ),
+    labelLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp
+    ),
+    labelMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.5.sp
+    )
+)
+```
+
+---
+
+## ViewModels Adicionales
+
+### PasswordDetailViewModel
+
+**Archivo**: `viewmodel/PasswordDetailViewModel.kt`
+
+Gestiona la pantalla de detalle de una contraseña individual.
+
+```kotlin
+class PasswordDetailViewModel(
+    private val getPasswordById: GetPasswordById,
+    private val context: Context
+) : ViewModel() {
+
+    private val clipboardManager: ClipboardManager by lazy {
+        context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    }
+
+    private val _state = MutableStateFlow(PasswordDetailState())
+    val state: StateFlow<PasswordDetailState> = _state.asStateFlow()
+
+    fun loadEntry(entryId: String) {
+        viewModelScope.launch {
+            val entry = getPasswordById(entryId)
+            _state.value = _state.value.copy(
+                entry = entry,
+                isLoading = false,
+                error = if (entry == null) "Entrada no encontrada" else null
+            )
+        }
+    }
+
+    fun togglePasswordVisibility() {
+        _state.value = _state.value.copy(
+            showPassword = !_state.value.showPassword
+        )
+    }
+
+    fun copyUsername(): ClipboardResult {
+        val username = _state.value.entry?.username
+        if (username.isNullOrBlank()) {
+            return ClipboardResult(false, "No hay usuario para copiar")
+        }
+        return copyToClipboard(username, "Usuario copiado")
+    }
+
+    fun copyPassword(): ClipboardResult {
+        val password = _state.value.entry?.password
+        if (password.isNullOrBlank()) {
+            return ClipboardResult(false, "No hay contraseña para copiar")
+        }
+        return copyToClipboard(password, "Contraseña copiada")
+    }
+
+    private fun copyToClipboard(text: String, successMessage: String): ClipboardResult {
+        val clip = ClipData.newPlainText("Password Manager", text)
+        clipboardManager.setPrimaryClip(clip)
+        return ClipboardResult(true, successMessage)
+    }
+}
+```
+
+**Estado**:
+```kotlin
+data class PasswordDetailState(
+    val entry: PasswordEntry? = null,
+    val showPassword: Boolean = false,
+    val isLoading: Boolean = true,
+    val error: String? = null
+)
+```
+
+**Funcionalidades**:
+- Carga entrada por ID
+- Alterna visibilidad de contraseña (icono ojo)
+- Copia username al portapapeles
+- Copia password al portapapeles
+- Manejo de errores
+
+---
+
+### PasswordGeneratorViewModel
+
+**Archivo**: `viewmodel/PasswordGeneratorViewModel.kt`
+
+Gestiona la generación de contraseñas seguras.
+
+```kotlin
+class PasswordGeneratorViewModel(
+    private val generatePassword: GeneratePassword
+) : ViewModel() {
+
+    var state by mutableStateOf(PasswordGeneratorState())
+        private set
+
+    init {
+        generatePassword()  // Generar una al iniciar
+    }
+
+    fun onEvent(event: PasswordGeneratorEvent) {
+        when (event) {
+            is PasswordGeneratorEvent.OnLengthChanged -> {
+                state = state.copy(passwordLength = event.length)
+                generatePassword()
+            }
+            is PasswordGeneratorEvent.OnUseUppercaseChanged -> {
+                state = state.copy(useUppercase = event.use)
+            }
+            is PasswordGeneratorEvent.OnGenerateClicked -> generatePassword()
+            is PasswordGeneratorEvent.OnCopyClicked -> {
+                state = state.copy(showCopiedMessage = true)
+            }
+            // ... más eventos
+        }
+    }
+
+    private fun generatePassword() {
+        val options = GeneratePassword.PasswordOptions(
+            length = state.passwordLength,
+            useUppercase = state.useUppercase,
+            useLowercase = state.useLowercase,
+            useDigits = state.useDigits,
+            useSymbols = state.useSymbols,
+            excludeAmbiguous = state.excludeAmbiguous
+        )
+
+        val password = generatePassword(options)
+        val strengthScore = generatePassword.calculateStrength(password)
+
+        state = state.copy(
+            generatedPassword = password,
+            strengthScore = strengthScore,
+            strengthLabel = generatePassword.getStrengthLabel(strengthScore),
+            strengthColor = generatePassword.getStrengthColor(strengthScore)
+        )
+    }
+}
+```
+
+**Estado**:
+```kotlin
+data class PasswordGeneratorState(
+    val generatedPassword: String = "",
+    val passwordLength: Int = 16,
+    val useUppercase: Boolean = true,
+    val useLowercase: Boolean = true,
+    val useDigits: Boolean = true,
+    val useSymbols: Boolean = true,
+    val excludeAmbiguous: Boolean = false,
+    val strengthScore: Int = 0,
+    val strengthLabel: String = "Débil",
+    val strengthColor: Long = 0xFFFF0000L,
+    val showCopiedMessage: Boolean = false
+)
+```
+
+**Eventos**:
+```kotlin
+sealed class PasswordGeneratorEvent {
+    data class OnLengthChanged(val length: Int) : PasswordGeneratorEvent()
+    data class OnUseUppercaseChanged(val use: Boolean) : PasswordGeneratorEvent()
+    data class OnUseLowercaseChanged(val use: Boolean) : PasswordGeneratorEvent()
+    data class OnUseDigitsChanged(val use: Boolean) : PasswordGeneratorEvent()
+    data class OnUseSymbolsChanged(val use: Boolean) : PasswordGeneratorEvent()
+    data class OnExcludeAmbiguousChanged(val exclude: Boolean) : PasswordGeneratorEvent()
+    data object OnGenerateClicked : PasswordGeneratorEvent()
+    data object OnCopyClicked : PasswordGeneratorEvent()
+    data object OnDismissCopiedMessage : PasswordGeneratorEvent()
+}
+```
+
+**Cálculo de Fortaleza**:
+```kotlin
+fun calculateStrength(password: String): Int {
+    var score = 0
+    if (password.length >= 8) score += 20
+    if (password.length >= 12) score += 20
+    if (password.length >= 16) score += 20
+    if (password.length >= 20) score += 10
+    if (password.any { it.isUpperCase() }) score += 15
+    if (password.any { it.isLowerCase() }) score += 10
+    if (password.any { it.isDigit() }) score += 15
+    if (password.any { !it.isLetterOrDigit() }) score += 10
+    return score.coerceIn(0, 100)
+}
+
+fun getStrengthLabel(score: Int): String = when {
+    score < 40 -> "Débil"
+    score < 70 -> "Media"
+    score < 90 -> "Fuerte"
+    else -> "Muy Fuerte"
+}
+
+fun getStrengthColor(score: Int): Long = when {
+    score < 40 -> 0xFFFF0000L  // Rojo
+    score < 70 -> 0xFFFFA500L  // Naranja
+    score < 90 -> 0xFFFFFF00L  // Amarillo
+    else -> 0xFF00FF00L        // Verde
+}
+```
+
+---
+
+### SettingsViewModel
+
+**Archivo**: `viewmodel/SettingsViewModel.kt`
+
+Gestiona la configuración de la aplicación.
+
+```kotlin
+class SettingsViewModel(
+    private val getSettings: GetSettings,
+    private val updateSettings: UpdateSettings,
+    private val setLockTimeout: SetLockTimeout,
+    private val setBiometricEnabled: SetBiometricEnabled,
+    private val setThemeMode: SetThemeMode
+) : ViewModel() {
+
+    private val _state = MutableStateFlow(SettingsState())
+    val state: StateFlow<SettingsState> = _state.asStateFlow()
+
+    init {
+        loadSettings()
+    }
+
+    private fun loadSettings() {
+        getSettings()
+            .onEach { settings ->
+                _state.value = _state.value.copy(
+                    lockTimeout = settings.lockTimeoutMinutes,
+                    biometricEnabled = settings.biometricEnabled,
+                    themeMode = settings.themeMode
+                )
+            }
+            .catch { e ->
+                _state.value = _state.value.copy(
+                    errorMessage = "Error al cargar configuración: ${e.message}"
+                )
+            }
+            .launchIn(viewModelScope)
+    }
+
+    fun updateLockTimeout(minutes: Int) {
+        viewModelScope.launch {
+            setLockTimeout(minutes)
+                .onSuccess {
+                    _state.value = _state.value.copy(
+                        lockTimeout = minutes,
+                        successMessage = "Auto-bloqueo actualizado"
+                    )
+                }
+                .onFailure { e ->
+                    _state.value = _state.value.copy(
+                        errorMessage = "Error: ${e.message}"
+                    )
+                }
+        }
+    }
+
+    fun toggleBiometric() {
+        viewModelScope.launch {
+            val newValue = !_state.value.biometricEnabled
+            setBiometricEnabled(newValue)
+                .onSuccess {
+                    _state.value = _state.value.copy(
+                        biometricEnabled = newValue,
+                        successMessage = if (newValue) "Biometría activada" else "Desactivada"
+                    )
+                }
+        }
+    }
+}
+```
+
+**Estado**:
+```kotlin
+data class SettingsState(
+    val lockTimeout: Int = 5,           // minutos
+    val biometricEnabled: Boolean = true,
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val showTimeoutPicker: Boolean = false,
+    val showThemePicker: Boolean = false,
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val successMessage: String? = null
+)
+```
+
+**Eventos**:
+```kotlin
+sealed class SettingsEvent {
+    data object ShowTimeoutPicker : SettingsEvent()
+    data object DismissTimeoutPicker : SettingsEvent()
+    data object ShowThemePicker : SettingsEvent()
+    data object DismissThemePicker : SettingsEvent()
+    data class OnLockTimeoutChanged(val minutes: Int) : SettingsEvent()
+    data class OnBiometricToggled(val enabled: Boolean) : SettingsEvent()
+    data class OnThemeModeChanged(val mode: ThemeMode) : SettingsEvent()
+    data object DismissMessage : SettingsEvent()
+}
+```
+
+---
+
+### AuditViewModel
+
+**Archivo**: `viewmodel/AuditViewModel.kt`
+
+Gestiona la auditoría de contraseñas débiles.
+
+```kotlin
+class AuditViewModel(
+    private val auditWeakPasswords: AuditWeakPasswords,
+    private val passwordRepository: PasswordRepository
+) : ViewModel() {
+
+    private val _state = MutableStateFlow(AuditState())
+    val state: StateFlow<AuditState> = _state.asStateFlow()
+
+    init {
+        runAudit()
+    }
+
+    fun runAudit() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoading = true)
+            
+            val result = auditWeakPasswords()
+            
+            _state.value = _state.value.copy(
+                isLoading = false,
+                totalPasswords = result.totalEntries,
+                weakPasswords = result.weakCount,
+                weakEntries = result.weakEntries,
+                securityScore = calculateSecurityScore(result)
+            )
+        }
+    }
+
+    private fun calculateSecurityScore(result: AuditResult): Int {
+        val weakPercentage = result.weakCount.toFloat() / result.totalEntries
+        return ((1 - weakPercentage) * 100).toInt().coerceIn(0, 100)
+    }
+}
+```
+
+**Estado**:
+```kotlin
+data class AuditState(
+    val totalPasswords: Int = 0,
+    val weakPasswords: Int = 0,
+    val weakEntries: List<WeakPasswordEntry> = emptyList(),
+    val securityScore: Int = 0,
+    val isLoading: Boolean = false,
+    val error: String? = null
+)
+```
+
+---
+
+### StatisticsViewModel
+
+**Archivo**: `viewmodel/StatisticsViewModel.kt`
+
+Gestiona las estadísticas de seguridad.
+
+```kotlin
+class StatisticsViewModel(
+    private val getSecurityStatistics: GetSecurityStatistics
+) : ViewModel() {
+
+    private val _state = MutableStateFlow(StatisticsState())
+    val state: StateFlow<StatisticsState> = _state.asStateFlow()
+
+    init {
+        loadStatistics()
+    }
+
+    fun loadStatistics() {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoading = true)
+            
+            val stats = getSecurityStatistics()
+            
+            _state.value = _state.value.copy(
+                isLoading = false,
+                totalPasswords = stats.totalPasswords,
+                favoriteCount = stats.favoriteCount,
+                categoryCount = stats.categoryCount,
+                weakPasswordCount = stats.weakPasswordCount,
+                reusedPasswordCount = stats.reusedPasswordCount,
+                oldPasswordCount = stats.oldPasswordCount,
+                averageStrength = stats.averageStrength
+            )
+        }
+    }
+}
+```
+
+**Estado**:
+```kotlin
+data class StatisticsState(
+    val totalPasswords: Int = 0,
+    val favoriteCount: Int = 0,
+    val categoryCount: Int = 0,
+    val weakPasswordCount: Int = 0,
+    val reusedPasswordCount: Int = 0,
+    val oldPasswordCount: Int = 0,
+    val averageStrength: Double = 0.0,
+    val isLoading: Boolean = false,
+    val error: String? = null
+)
+```
+
+---
+
+### BackupViewModel
+
+**Archivo**: `viewmodel/BackupViewModel.kt`
+
+Gestiona exportación e importación de backups.
+
+```kotlin
+class BackupViewModel(
+    private val exportEncryptedBackup: ExportEncryptedBackup,
+    private val importFromCSV: ImportFromCSV,
+    private val authRepository: AuthRepository
+) : ViewModel() {
+
+    private val _state = MutableStateFlow(BackupState())
+    val state: StateFlow<BackupState> = _state.asStateFlow()
+
+    fun exportBackup(outputPath: String) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoading = true)
+            
+            // Verificar sesión activa
+            if (authRepository.getMasterKey() == null) {
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    error = "No hay sesión activa"
+                )
+                return@launch
+            }
+            
+            exportEncryptedBackup(outputPath)
+                .onSuccess {
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        successMessage = "Backup exportado correctamente"
+                    )
+                }
+                .onFailure { e ->
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        error = "Error al exportar: ${e.message}"
+                    )
+                }
+        }
+    }
+
+    fun importBackup(inputPath: String) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(isLoading = true)
+            
+            importFromCSV(inputPath)
+                .onSuccess { count ->
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        successMessage = "$count contraseñas importadas"
+                    )
+                }
+                .onFailure { e ->
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        error = "Error al importar: ${e.message}"
+                    )
+                }
+        }
+    }
+}
+```
+
+**Estado**:
+```kotlin
+data class BackupState(
+    val isLoading: Boolean = false,
+    val isExporting: Boolean = false,
+    val isImporting: Boolean = false,
+    val progress: Float = 0f,
+    val successMessage: String? = null,
+    val error: String? = null
+)
+```
+
+---
+
+### ChangePasswordViewModel
+
+**Archivo**: `viewmodel/ChangePasswordViewModel.kt`
+
+Gestiona el cambio de contraseña maestra.
+
+```kotlin
+class ChangePasswordViewModel(
+    private val changeMasterPassword: ChangeMasterPassword,
+    private val authRepository: AuthRepository
+) : ViewModel() {
+
+    private val _state = MutableStateFlow(ChangePasswordState())
+    val state: StateFlow<ChangePasswordState> = _state.asStateFlow()
+
+    fun onChangePassword(
+        oldPassword: CharArray,
+        newPassword: CharArray,
+        confirmPassword: CharArray
+    ) {
+        viewModelScope.launch {
+            // Validaciones
+            if (newPassword.contentEquals(confirmPassword)) {
+                _state.value = _state.value.copy(
+                    error = "Las contraseñas no coinciden"
+                )
+                return@launch
+            }
+            
+            if (!PasswordValidator.isValid(newPassword)) {
+                _state.value = _state.value.copy(
+                    error = "La contraseña no cumple los requisitos"
+                )
+                return@launch
+            }
+            
+            _state.value = _state.value.copy(isLoading = true)
+            
+            changeMasterPassword(oldPassword, newPassword)
+                .onSuccess {
+                    // Limpiar sesión y forzar re-login
+                    authRepository.clearMasterKey()
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        successMessage = "Contraseña cambiada. Inicia sesión nuevamente."
+                    )
+                }
+                .onFailure { e ->
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        error = "Error: ${e.message}"
+                    )
+                }
+        }
+    }
+}
+```
+
+**Estado**:
+```kotlin
+data class ChangePasswordState(
+    val isLoading: Boolean = false,
+    val oldPassword: String = "",
+    val newPassword: String = "",
+    val confirmPassword: String = "",
+    val error: String? = null,
+    val successMessage: String? = null
+)
+```
+
+---
+
+## Navegación Detallada
+
+### Grafo Completo de Navegación
+
+**Archivo**: `NavGraph.kt`
+
+```kotlin
+sealed class Screen(val route: String) {
+    object Login : Screen("login")
+    object Onboarding : Screen("onboarding")
+    object Home : Screen("home")
+    object PasswordList : Screen("password_list")
+    object PasswordDetail : Screen("password_detail/{id}")
+    object PasswordForm : Screen("password_form")
+    object PasswordFormEdit : Screen("password_form/{id}")
+    object PasswordGenerator : Screen("password_generator")
+    object CategoryManagement : Screen("category_management")
+    object Settings : Screen("settings")
+    object Backup : Screen("backup")
+    object Audit : Screen("audit")
+    object Statistics : Screen("statistics")
+    object ChangePassword : Screen("change_password")
+}
+```
+
+### Flujo de Navegación Principal
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    ¿Primera vez?                             │
+│                          │                                   │
+│              ┌───────────┴───────────┐                       │
+│              ▼                       ▼                       │
+│         Onboarding               Login                       │
+│              │                       │                       │
+│              └───────────┬───────────┘                       │
+│                          ▼                                   │
+│                      Home Screen                             │
+│                          │                                   │
+│        ┌─────────────────┼─────────────────┐                 │
+│        ▼                 ▼                 ▼                 │
+│  PasswordList     PasswordGenerator   CategoryMgmt           │
+│       │                                      │               │
+│       ▼                                      ▼               │
+│  PasswordDetail                         (editar)              │
+│       │                                                      │
+│       ▼                                                      │
+│  PasswordForm (edit)                                         │
+│                                                              │
+│  Otras rutas desde Home:                                     │
+│  - Settings → ChangePassword                                 │
+│  - Backup                                                    │
+│  - Audit                                                     │
+│  - Statistics                                                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Configuración de Rutas
+
+```kotlin
+@Composable
+fun NavGraph(
+    navController: NavController = rememberNavController()
+) {
+    NavHost(
+        navController = navController,
+        startDestination = determineStartDestination(),
+        modifier = Modifier.padding(innerPadding)
+    ) {
+        // Onboarding - Solo primera vez
+        composable("onboarding") {
+            OnboardingScreen(
+                onComplete = {
+                    navController.navigate("home") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
+        }
+        
+        // Login
+        composable("login") {
+            LoginScreen(
+                onLoginSuccess = {
+                    navController.navigate("home") {
+                        popUpTo("login") { inclusive = true }
+                    }
+                },
+                onNavigateToOnboarding = {
+                    navController.navigate("onboarding")
+                }
+            )
+        }
+        
+        // Home - Pantalla principal
+        composable("home") {
+            HomeScreen(
+                onNavigateToPasswordList = {
+                    navController.navigate("password_list")
+                },
+                onNavigateToGenerator = {
+                    navController.navigate("password_generator")
+                },
+                onNavigateToCategoryManagement = {
+                    navController.navigate("category_management")
+                },
+                onNavigateToBackup = {
+                    navController.navigate("backup")
+                },
+                onNavigateToAudit = {
+                    navController.navigate("audit")
+                },
+                onNavigateToStatistics = {
+                    navController.navigate("statistics")
+                },
+                onNavigateToSettings = {
+                    navController.navigate("settings")
+                }
+            )
+        }
+        
+        // Lista de contraseñas
+        composable("password_list") {
+            PasswordListScreen(
+                onNavigateToDetail = { id ->
+                    navController.navigate("password_detail/$id")
+                },
+                onNavigateToCreate = {
+                    navController.navigate("password_form")
+                },
+                onNavigateToEdit = { id ->
+                    navController.navigate("password_form/$id")
+                }
+            )
+        }
+        
+        // Detalle de contraseña
+        composable(
+            route = "password_detail/{id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("id") ?: return@composable
+            PasswordDetailScreen(
+                entryId = id,
+                onNavigateToEdit = {
+                    navController.navigate("password_form/$id")
+                },
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+        
+        // Formulario (crear)
+        composable("password_form") {
+            PasswordFormScreen(
+                entryId = null,
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+        
+        // Formulario (editar)
+        composable(
+            route = "password_form/{id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("id") ?: return@composable
+            PasswordFormScreen(
+                entryId = id,
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+        
+        // Generador de contraseñas
+        composable("password_generator") {
+            PasswordGeneratorScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onPasswordGenerated = { password ->
+                    // Opcional: navegar a password_form con password
+                }
+            )
+        }
+        
+        // Gestión de categorías
+        composable("category_management") {
+            CategoryManagementScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+        
+        // Configuración
+        composable("settings") {
+            SettingsScreen(
+                onNavigateToChangePassword = {
+                    navController.navigate("change_password")
+                },
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+        
+        // Cambiar contraseña maestra
+        composable("change_password") {
+            ChangePasswordScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onPasswordChanged = {
+                    // Forzar re-autenticación
+                    navController.navigate("login") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
+        }
+        
+        // Backup
+        composable("backup") {
+            BackupScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+        
+        // Auditoría
+        composable("audit") {
+            AuditScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onNavigateToPasswordDetail = { id ->
+                    navController.navigate("password_detail/$id")
+                }
+            )
+        }
+        
+        // Estadísticas
+        composable("statistics") {
+            StatisticsScreen(
+                onNavigateBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+    }
+}
+```
+
+### Patrones de Navegación
+
+#### Navegación con PopUpTo
+
+Para evitar acumular pantallas en el backstack:
+
+```kotlin
+// Después de login exitoso
+navController.navigate("home") {
+    popUpTo("login") { inclusive = true }
+}
+
+// Después de completar onboarding
+navController.navigate("home") {
+    popUpTo(0) { inclusive = true }  // Limpia todo el backstack
+}
+```
+
+#### Navegación con Argumentos
+
+```kotlin
+// Definir ruta con argumento
+object PasswordDetail : Screen("password_detail/{id}")
+
+// Navegar con argumento
+navController.navigate("password_detail/$id")
+
+// Leer argumento en destino
+val id = backStackEntry.arguments?.getString("id")
+```
+
+#### Navegación Conditional
+
+```kotlin
+fun determineStartDestination(): String {
+    return when {
+        !hasMasterPassword() -> "onboarding"
+        !isAuthenticated() -> "login"
+        else -> "home"
+    }
+}
+```
+
+---
+
+## MainActivity
+
+**Archivo**: `MainActivity.kt`
+
+```kotlin
+class MainActivity : ComponentActivity() {
+
+    private val autoLockManager: AutoLockManager by inject()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate()
+        
+        // Habilitar edge-to-edge
+        enableEdgeToEdge()
+        
+        setContent {
+            PasswordManagerTheme {
+                Scaffold(
+                    modifier = Modifier.fillMaxSize()
+                ) { innerPadding ->
+                    NavGraph(
+                        navController = rememberNavController(),
+                        innerPadding = innerPadding
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        autoLockManager.resetTimer()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        autoLockManager.startLockTimer()
+    }
+}
+```
+
+---
+
+## AutoLockManager
+
+**Archivo**: `AutoLockManager.kt`
+
+Gestiona el bloqueo automático de la aplicación cuando pasa a segundo plano.
+
+```kotlin
+class AutoLockManager(
+    private val settingsRepository: SettingsRepository,
+    private val application: Application
+) : LifecycleEventObserver {
+
+    private var lockTimer: Job? = null
+    private var lastAccessTime: Long = 0
+    private var lockTimeoutMs: Long = 300_000  // 5 minutos por defecto
+
+    fun initialize() {
+        // Observar ciclo de vida de la aplicación
+        ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+        
+        // Cargar configuración de timeout
+        viewModelScope.launch {
+            lockTimeoutMs = settingsRepository.getLockTimeout()
+        }
+    }
+
+    override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+        when (event) {
+            Lifecycle.Event.ON_STOP -> {
+                // App pasó a segundo plano
+                lastAccessTime = System.currentTimeMillis()
+                startLockTimer()
+            }
+            Lifecycle.Event.ON_START -> {
+                // App volvió a primer plano
+                stopLockTimer()
+                checkIfLockRequired()
+            }
+            else -> {}
+        }
+    }
+
+    private fun startLockTimer() {
+        lockTimer = viewModelScope.launch {
+            delay(lockTimeoutMs)
+            // Tiempo agotado, requerir autenticación
+            requireAuthentication()
+        }
+    }
+
+    private fun stopLockTimer() {
+        lockTimer?.cancel()
+        lockTimer = null
+    }
+
+    private fun checkIfLockRequired() {
+        val elapsed = System.currentTimeMillis() - lastAccessTime
+        if (elapsed > lockTimeoutMs) {
+            requireAuthentication()
+        }
+    }
+
+    private fun requireAuthentication() {
+        // Limpiar clave maestra de memoria
+        authRepository.clearMasterKey()
+        
+        // Navegar a pantalla de login
+        // (requiere referencia a NavController o usar evento)
+    }
+
+    fun resetTimer() {
+        lastAccessTime = System.currentTimeMillis()
+        stopLockTimer()
+    }
+
+    fun setLockTimeout(timeoutMs: Long) {
+        lockTimeoutMs = timeoutMs
+    }
+}
+```
+
+**Configuración de Timeout**:
+
+| Opción | Valor (ms) |
+|--------|------------|
+| 1 minuto | 60,000 |
+| 2 minutos | 120,000 |
+| 5 minutos | 300,000 (default) |
+| 10 minutos | 600,000 |
+| Nunca | -1 (no iniciar timer) |
+
+---
+
+## Widget de Generador (App Widget)
+
+**Archivo**: `PasswordGeneratorWidget.kt` (en `presentation/widget/`)
+
+Widget de pantalla de inicio para generar contraseñas rápidamente.
+
+```kotlin
+@Composable
+fun PasswordGeneratorWidget(
+    state: PasswordGeneratorState,
+    onGenerate: () -> Unit,
+    onCopy: (String) -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .size(180.dp)
+            .padding(8.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primaryContainer
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = Icons.Default.Key,
+                contentDescription = null,
+                modifier = Modifier.size(32.dp)
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = "Generar Contraseña",
+                style = MaterialTheme.typography.titleSmall
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            if (state.generatedPassword.isNotEmpty()) {
+                Text(
+                    text = state.generatedPassword,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            
+            Spacer(modifier = Modifier.weight(1f))
+            
+            Button(
+                onClick = onGenerate,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Generar")
+            }
+        }
+    }
+}
+```
+
+### Configuración del Widget
+
+```kotlin
+@Composable
+fun PasswordGeneratorWidgetPreview() {
+    PasswordManagerTheme {
+        PasswordGeneratorWidget(
+            state = PasswordGeneratorState(
+                generatedPassword = "K#9mX$2pL@5nQr8Y",
+                length = 16,
+                includeUppercase = true,
+                includeLowercase = true,
+                includeNumbers = true,
+                includeSymbols = true
+            ),
+            onGenerate = { },
+            onCopy = { }
+        )
+    }
+}
+```
+
+---
+
+**Documentación Relacionada:**
+- [Screens Overview](screens/overview.md)
+- [ViewModels](viewmodels/overview.md)
+- [Components](components/overview.md)
 
 ## AutoLockManager
 

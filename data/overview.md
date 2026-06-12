@@ -703,15 +703,660 @@ fun searchSlow(query: String): Flow<List<PasswordEntryEntity>>
 fun searchOptimized(query: String): Flow<List<PasswordEntryEntity>>
 ```
 
+## Componentes de Seguridad (Implementación)
+
+### PasswordDeriver
+
+**Archivo**: `security/PasswordDeriver.kt`
+
+Deriva clave simétrica del password maestro usando PBKDF2-HMAC-SHA256.
+
+```kotlin
+class PasswordDeriver {
+    fun generateSalt(): ByteArray {
+        val salt = ByteArray(SALT_SIZE)
+        secureRandom.nextBytes(salt)
+        return salt
+    }
+    
+    fun deriveKey(password: CharArray, salt: ByteArray): ByteArray {
+        val keySpec = PBEKeySpec(
+            password,
+            salt,
+            PBKDF2_ITERATIONS,  // 100,000
+            KEY_LENGTH_BITS     // 256
+        )
+        
+        val secretKeyFactory = SecretKeyFactory.getInstance(PBKDF2_ALGORITHM)
+        val keyBytes = secretKeyFactory.generateSecret(keySpec).encoded
+        
+        keySpec.clearPassword()  // Limpiar memoria
+        password.fillPassword()   // Limpiar password
+        
+        return keyBytes
+    }
+    
+    companion object {
+        private const val PBKDF2_ALGORITHM = "PBKDF2withHmacSHA256"
+        private const val PBKDF2_ITERATIONS = 100_000  // OWASP 2023
+        private const val KEY_LENGTH_BITS = 256
+        private const val SALT_SIZE = 16  // 128 bits
+    }
+}
+```
+
+**Características de Seguridad**:
+- **100,000 iteraciones**: Recomendación OWASP 2023 para hacer fuerza bruta inviable
+- **Salt de 16 bytes**: Generado con `SecureRandom` para cada usuario
+- **Limpieza de memoria**: `CharArray` se limpia después de usar para evitar fugas
+- **SHA-256**: Función hash criptográfica segura
+
+---
+
+### CipherManager
+
+**Archivo**: `security/CipherManager.kt`
+
+Cifra/descifra la clave derivada usando RSA del Keystore.
+
+```kotlin
+class CipherManager {
+    companion object {
+        private const val RSA_TRANSFORMATION = "RSA/ECB/PKCS1Padding"
+    }
+    
+    fun encrypt(keyToEncrypt: ByteArray, publicKey: PublicKey): ByteArray {
+        val cipher = Cipher.getInstance(RSA_TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey)
+        return cipher.doFinal(keyToEncrypt)
+    }
+    
+    fun decrypt(encryptedData: ByteArray, privateKey: PrivateKey): ByteArray {
+        val cipher = Cipher.getInstance(RSA_TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, privateKey)
+        return cipher.doFinal(encryptedData)
+    }
+}
+```
+
+**Parámetros RSA**:
+| Parámetro | Valor | Descripción |
+|-----------|-------|-------------|
+| Algoritmo | RSA | Criptografía asimétrica |
+| Padding | PKCS1Padding | Compatible universalmente en Android |
+| Clave | 2048 bits | Estándar de seguridad |
+| Uso | Cifrar clave derivada | Protege la clave maestra |
+
+**Logging Detallado** (para debugging):
+```kotlin
+fun decrypt(encryptedData: ByteArray, privateKey: PrivateKey): ByteArray {
+    Log.d(TAG, "========== INICIO DESCIFRADO RSA ==========")
+    Log.d(TAG, "Datos cifrados: ${encryptedData.size} bytes")
+    Log.d(TAG, "Algoritmo: $RSA_TRANSFORMATION")
+    Log.d(TAG, "Clave privada algoritmo: ${privateKey.algorithm}")
+    Log.d(TAG, "Clave privada formato: ${privateKey.format}")
+    
+    val cipher = Cipher.getInstance(RSA_TRANSFORMATION)
+    cipher.init(Cipher.DECRYPT_MODE, privateKey)
+    
+    val result = cipher.doFinal(encryptedData)
+    Log.d(TAG, "Datos descifrados correctamente (${result.size} bytes)")
+    Log.d(TAG, "========== FIN DESCIFRADO RSA ==========")
+    return result
+}
+```
+
+---
+
+### DataCipher
+
+**Archivo**: `security/DataCipher.kt`
+
+Cifra/descifra campos individuales (password, notas) con AES-256-GCM.
+
+```kotlin
+class DataCipher {
+    private val secureRandom = SecureRandom()
+    private var lastIv: ByteArray? = null
+    
+    fun encrypt(plaintext: String, key: ByteArray): ByteArray {
+        require(key.size == KEY_SIZE_BYTES)
+        
+        // Generar IV aleatorio de 12 bytes (96 bits)
+        val iv = ByteArray(IV_SIZE)
+        secureRandom.nextBytes(iv)
+        lastIv = iv
+        
+        val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
+        val keySpec = SecretKeySpec(key, AES_ALGORITHM)
+        val gcmSpec = GCMParameterSpec(TAG_LENGTH_BITS, iv)
+        
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec, gcmSpec)
+        val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        
+        // Prependir IV al ciphertext
+        return iv + ciphertext
+    }
+    
+    fun decrypt(ciphertext: ByteArray, key: ByteArray): String {
+        require(key.size == KEY_SIZE_BYTES)
+        require(ciphertext.size > IV_SIZE)
+        
+        // Extraer IV (primeros 12 bytes)
+        val iv = ciphertext.copyOfRange(0, IV_SIZE)
+        val actualCiphertext = ciphertext.copyOfRange(IV_SIZE, ciphertext.size)
+        
+        val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
+        val keySpec = SecretKeySpec(key, AES_ALGORITHM)
+        val gcmSpec = GCMParameterSpec(TAG_LENGTH_BITS, iv)
+        
+        cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec)
+        val plaintextBytes = cipher.doFinal(actualCiphertext)
+        return String(plaintextBytes, Charsets.UTF_8)
+    }
+    
+    companion object {
+        private const val AES_ALGORITHM = "AES"
+        private const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
+        private const val KEY_SIZE_BYTES = 32  // 256 bits
+        private const val IV_SIZE = 12         // 96 bits (recomendado para GCM)
+        private const val TAG_LENGTH_BITS = 128 // Tag de autenticación
+    }
+}
+```
+
+**Características de AES-GCM**:
+- **Galois/Counter Mode**: Proporciona confidencialidad + autenticidad
+- **Tag de 128 bits**: Detecta cualquier modificación de datos
+- **IV único por operación**: Previene ataques de replay
+- **No padding**: Modo de flujo, más eficiente
+
+---
+
+### SecureStorage
+
+**Archivo**: `security/SecureStorage.kt`
+
+Almacena metadata de cifrado en SharedPreferences.
+
+```kotlin
+class SecureStorage(context: Context) {
+    private val prefs: SharedPreferences = context.getSharedPreferences(
+        PREFS_NAME, Context.MODE_PRIVATE
+    )
+    
+    fun saveSalt(salt: ByteArray) {
+        val encoded = Base64.encodeToString(salt, Base64.NO_WRAP)
+        prefs.edit().putString(KEY_SALT, encoded).apply()
+    }
+    
+    fun saveEncryptedKey(encryptedKey: ByteArray) {
+        val encoded = Base64.encodeToString(encryptedKey, Base64.NO_WRAP)
+        prefs.edit().putString(KEY_ENCRYPTED_KEY, encoded).apply()
+    }
+    
+    fun saveIV(iv: ByteArray) {
+        val encoded = Base64.encodeToString(iv, Base64.NO_WRAP)
+        prefs.edit().putString(KEY_IV, encoded).apply()
+    }
+    
+    fun getSalt(): ByteArray? {
+        val encoded = prefs.getString(KEY_SALT, null) ?: return null
+        return Base64.decode(encoded, Base64.NO_WRAP)
+    }
+    
+    fun getEncryptedKey(): ByteArray? {
+        val encoded = prefs.getString(KEY_ENCRYPTED_KEY, null) ?: return null
+        return Base64.decode(encoded, Base64.NO_WRAP)
+    }
+    
+    fun hasStoredData(): Boolean {
+        return getSalt() != null && getEncryptedKey() != null
+    }
+    
+    companion object {
+        const val PREFS_NAME = "secure_storage"
+        private const val KEY_SALT = "salt"
+        private const val KEY_ENCRYPTED_KEY = "encrypted_key"
+        private const val KEY_IV = "iv"
+    }
+}
+```
+
+**Datos Almacenados**:
+| Clave | Contenido | Propósito |
+|-------|-----------|-----------|
+| `salt` | 16 bytes (Base64) | Derivar clave del password |
+| `encrypted_key` | Clave cifrada RSA | Clave maestra protegida |
+| `iv` | 12 bytes (Base64) | Último IV usado (referencia) |
+
+---
+
+### BiometricAuthenticator
+
+**Archivo**: `security/BiometricAuthenticator.kt`
+
+Wrapper de BiometricPrompt para autenticación biométrica.
+
+```kotlin
+sealed class BiometricStatus {
+    object Available : BiometricStatus()      // Hardware + configurado
+    object NotAvailable : BiometricStatus()   // Sin hardware
+    object NotEnrolled : BiometricStatus()    // Sin biometría registrada
+}
+
+class BiometricAuthenticator {
+    fun canAuthenticate(context: Context): BiometricStatus {
+        val biometricManager = BiometricManager.from(context)
+        
+        return when (biometricManager.canAuthenticate(
+            BiometricManager.Authenticators.BIOMETRIC_STRONG
+        )) {
+            BiometricManager.BIOMETRIC_SUCCESS -> BiometricStatus.Available
+            BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> BiometricStatus.NotAvailable
+            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BiometricStatus.NotEnrolled
+            else -> BiometricStatus.NotAvailable
+        }
+    }
+    
+    fun authenticate(
+        fragment: Fragment,
+        onAuthSuccess: () -> Unit,
+        onAuthError: (String) -> Unit,
+        onCancellation: () -> Unit = {}
+    ) {
+        val executor = ContextCompat.getMainExecutor(fragment.requireContext())
+        
+        val biometricPrompt = BiometricPrompt(
+            fragment, executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: AuthenticationResult) {
+                    onAuthSuccess()
+                }
+                
+                override fun onAuthenticationFailed() {
+                    onAuthError("Biometría no reconocida. Inténtalo de nuevo.")
+                }
+                
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    if (errorCode == BiometricPrompt.ERROR_USER_CANCELED) {
+                        onCancellation()
+                    } else {
+                        onAuthError(errString.toString())
+                    }
+                }
+            }
+        )
+        
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Autenticación requerida")
+            .setSubtitle("Usa tu huella o rostro para desbloquear PasswordManager")
+            .setNegativeButtonText("Usar contraseña")
+            .build()
+        
+        biometricPrompt.authenticate(promptInfo)
+    }
+}
+```
+
+**Tipos Biométricos Soportados**:
+- Huella dactilar (Fingerprint)
+- Reconocimiento facial (Face Unlock)
+- Iris scanner (dispositivos compatibles)
+
+**Estados**:
+| Estado | Descripción | Acción |
+|--------|-------------|--------|
+| `Available` | Hardware presente + biometría registrada | Permitir autenticación |
+| `NotAvailable` | Sin hardware biométrico | Usar contraseña maestra |
+| `NotEnrolled` | Hardware existe, sin biometría | Guijar a configuración |
+
+---
+
+## Flujo de Cifrado Completo
+
+### Configuración Inicial (Setup)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Usuario crea password maestro: "MiPassword123!"              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. PasswordDeriver.generateSalt()                               │
+│    Salt: [0x3A, 0x7F, 0x1B, ...] (16 bytes aleatorios)          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. PasswordDeriver.deriveKey(password, salt)                    │
+│    PBKDF2-HMAC-SHA256, 100,000 iteraciones                      │
+│    Clave derivada: [0x8B, 0x2C, 0x9D, ...] (32 bytes)           │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. KeystoreManager.generateKeyIfNeeded()                        │
+│    Genera par RSA-2048 en Android Keystore                      │
+│    Clave pública:  ---BEGIN PUBLIC KEY---...                    │
+│    Clave privada:  (requiere biometría)                         │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. CipherManager.encrypt(derivedKey, publicKey)                 │
+│    RSA/ECB/PKCS1Padding                                         │
+│    Clave cifrada: [0x4D, 0x8E, 0x2A, ...]                       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 6. SecureStorage.saveSalt(salt)                                 │
+│    SecureStorage.saveEncryptedKey(encryptedKey)                 │
+│    SharedPreferences:                                           │
+│      salt = "On9/GhsfGxY=..."                                   │
+│      encrypted_key = "TYuI8HbsdfG..."                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Autenticación (Login)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Usuario ingresa password: "MiPassword123!"                   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. Leer salt de SecureStorage                                   │
+│    salt = [0x3A, 0x7F, 0x1B, ...]                               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. PasswordDeriver.deriveKey(password, salt)                    │
+│    Clave candidata: [0x8B, 0x2C, 0x9D, ...]                     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. Leer encryptedKey de SecureStorage                           │
+│    encryptedKey = [0x4D, 0x8E, 0x2A, ...]                       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. BiometricAuthenticator.authenticate()                        │
+│    Muestra BiometricPrompt                                      │
+│    Usuario autentica con huella                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 6. KeystoreManager.getPrivateKey()                              │
+│    Desbloquea clave privada (requiere biometría)                │
+│    privateKey = AndroidKeyStore private key                     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 7. CipherManager.decrypt(encryptedKey, privateKey)              │
+│    RSA descifrado                                               │
+│    Clave almacenada: [0x8B, 0x2C, 0x9D, ...]                    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 8. Comparar claves                                              │
+│    candidateKey.contentEquals(storedKey)                        │
+│    ✓ Iguales → Autenticación exitosa                           │
+│    ✗ Diferentes → SecurityException                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Cifrado de Contraseña (Guardar)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Usuario guarda password: "SuperSecret123!"                   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. Obtener masterKey de sesión                                  │
+│    masterKey = [0x8B, 0x2C, 0x9D, ...]                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. DataCipher.encrypt(password, masterKey)                      │
+│    a) Generar IV: [0x5A, 0x3B, 0x7C, ...] (12 bytes)            │
+│    b) AES-256-GCM cifrado                                       │
+│    c) ciphertext = [0x9E, 0x4F, 0x1D, ...]                      │
+│    d) Retornar: IV + ciphertext                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. Codificar Base64                                             │
+│    Base64.encode(IV + ciphertext)                               │
+│    "WjtXfJ4K9mLpQ2vN8xR3..."                                    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. PasswordRepositoryImpl.insertEntry()                         │
+│    INSERT INTO password_entries (password, ...)                 │
+│    VALUES ('WjtXfJ4K9mLpQ2vN8xR3...', ...)                      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Descifrado de Contraseña (Leer)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. PasswordListScreen observa getAllEntries()                   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. PasswordEntryDao.getAll()                                    │
+│    SELECT * FROM password_entries                               │
+│    Retorna: PasswordEntryEntity(password="WjtXfJ4K9m...")       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. PasswordRepositoryImpl.decryptEntry()                        │
+│    a) Decodificar Base64: Base64.decode("WjtXfJ4K9m...")        │
+│    b) Extraer IV: primeros 12 bytes                             │
+│    c) Extraer ciphertext: resto                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. DataCipher.decrypt(ciphertext, masterKey)                    │
+│    a) AES-256-GCM descifrado                                    │
+│    b) Verificar tag de autenticación                            │
+│    c) Retornar plaintext: "SuperSecret123!"                     │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. Construir PasswordEntry (dominio)                            │
+│    PasswordEntry(password="SuperSecret123!", ...)               │
+│    Emite a Flow → ViewModel → UI                                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Testing de Seguridad
+
+### Unit Tests para PasswordDeriver
+
+```kotlin
+class PasswordDeriverTest {
+    
+    private val passwordDeriver = PasswordDeriver()
+    
+    @Test
+    fun `salt should be 16 bytes`() {
+        // When
+        val salt = passwordDeriver.generateSalt()
+        
+        // Then
+        assertEquals(16, salt.size)
+    }
+    
+    @Test
+    fun `derived key should be 32 bytes (256 bits)`() {
+        // Given
+        val password = "TestPassword123!".toCharArray()
+        val salt = passwordDeriver.generateSalt()
+        
+        // When
+        val key = passwordDeriver.deriveKey(password, salt)
+        
+        // Then
+        assertEquals(32, key.size)
+    }
+    
+    @Test
+    fun `same password and salt should produce same key`() {
+        // Given
+        val password = "TestPassword123!".toCharArray()
+        val salt = passwordDeriver.generateSalt()
+        
+        // When
+        val key1 = passwordDeriver.deriveKey(password, salt)
+        val key2 = passwordDeriver.deriveKey(password, salt)
+        
+        // Then
+        assertTrue(key1.contentEquals(key2))
+    }
+    
+    @Test
+    fun `different salt should produce different key`() {
+        // Given
+        val password = "TestPassword123!".toCharArray()
+        val salt1 = passwordDeriver.generateSalt()
+        val salt2 = passwordDeriver.generateSalt()
+        
+        // When
+        val key1 = passwordDeriver.deriveKey(password, salt1)
+        val key2 = passwordDeriver.deriveKey(password, salt2)
+        
+        // Then
+        assertFalse(key1.contentEquals(key2))
+    }
+}
+```
+
+### Unit Tests para DataCipher
+
+```kotlin
+class DataCipherTest {
+    
+    private val dataCipher = DataCipher()
+    private val testKey = ByteArray(32) { 0x42 }  // Clave de prueba
+    
+    @Test
+    fun `encrypt and decrypt should return original text`() {
+        // Given
+        val plaintext = "SecretPassword123!"
+        
+        // When
+        val encrypted = dataCipher.encrypt(plaintext, testKey)
+        val decrypted = dataCipher.decrypt(encrypted, testKey)
+        
+        // Then
+        assertEquals(plaintext, decrypted)
+    }
+    
+    @Test
+    fun `same plaintext should produce different ciphertext`() {
+        // Given
+        val plaintext = "SecretPassword123!"
+        
+        // When
+        val encrypted1 = dataCipher.encrypt(plaintext, testKey)
+        val encrypted2 = dataCipher.encrypt(plaintext, testKey)
+        
+        // Then
+        // IV aleatorio hace que cada cifrado sea único
+        assertFalse(encrypted1.contentEquals(encrypted2))
+    }
+    
+    @Test
+    fun `different key should fail decryption`() {
+        // Given
+        val plaintext = "SecretPassword123!"
+        val wrongKey = ByteArray(32) { 0x00 }
+        val encrypted = dataCipher.encrypt(plaintext, testKey)
+        
+        // When / Then
+        assertThrows(BadPaddingException::class.java) {
+            dataCipher.decrypt(encrypted, wrongKey)
+        }
+    }
+}
+```
+
+## Consideraciones de Seguridad
+
+### 1. Gestión de Memoria
+
+```kotlin
+// ✅ CORRECTO: Usar CharArray y limpiar
+fun deriveKey(password: CharArray, salt: ByteArray): ByteArray {
+    try {
+        val keySpec = PBEKeySpec(password, salt, iterations, keyLength)
+        // ... usar keySpec
+        return keyBytes
+    } finally {
+        keySpec.clearPassword()  // Limpiar memoria
+        password.fillPassword()   // Limpiar password
+    }
+}
+
+// ❌ INCORRECTO: Usar String (inmutable en memoria)
+fun deriveKey(password: String, salt: ByteArray): ByteArray {
+    // El password permanece en memoria hasta GC
+}
+```
+
+### 2. Almacenamiento Seguro
+
+| Dato | Ubicación | Protección |
+|------|-----------|------------|
+| Salt | SharedPreferences | No sensible, puede ser público |
+| Clave cifrada | SharedPreferences | Cifrada con RSA (Keystore) |
+| Clave privada | Android Keystore | Hardware-backed, requiere biometría |
+| Contraseñas | Room Database | Cifradas con AES-256-GCM |
+| Notas | Room Database | Cifradas con AES-256-GCM |
+
+### 3. Protección contra Ataques
+
+| Ataque | Mitigación |
+|--------|------------|
+| Fuerza bruta | PBKDF2 100,000 iteraciones |
+| Rainbow tables | Salt único por usuario |
+| Extracción de datos | AES-256-GCM con tag de autenticación |
+| Extracción de claves | Android Keystore hardware-backed |
+| Replay attacks | IV único por operación |
+| Modificación de datos | GCM tag detecta alteraciones |
+
 ## Referencias
 
-- [Room Documentation](https://developer.android.com/training/data-storage/room)
-- [Flow Documentation](https://kotlinlang.org/docs/flow.html)
-- [DataStore Documentation](https://developer.android.com/topic/libraries/architecture/datastore)
+- [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+- [Android Keystore System](https://developer.android.com/security/keystore)
+- [AES-GCM Implementation Guide](https://developer.android.com/security/using-cryptography)
+- [BiometricPrompt Documentation](https://developer.android.com/reference/androidx/biometric/BiometricPrompt)
 
 ---
 
 **Documentación Relacionada:**
 - [Arquitectura](../arquitectura/overview.md)
-- [Seguridad](../security/overview.md)
 - [Dominio](../domain/overview.md)
+- [Presentation](../presentation/overview.md)
+

@@ -149,7 +149,7 @@ androidx.biometric
 
 1. **PasswordEntry** - Almacena las entradas de contraseñas
 2. **Category** - Categorías para organizar contraseñas
-3. **Settings** - Configuración de la aplicación
+3. **Settings** - Configuración de la aplicación (clave-valor)
 
 ### Esquema de PasswordEntry
 
@@ -162,9 +162,163 @@ androidx.biometric
 | notes | String? | Notas adicionales cifradas |
 | url | String? | URL del sitio |
 | categoryId | String | FK a Category |
-| createdAt | Date | Fecha de creación |
-| updatedAt | Date | Fecha de modificación |
+| icon | String? | Icono de Font Awesome |
 | isFavorite | Boolean | Marcado como favorito |
+| createdAt | Long | Timestamp de creación (epoch ms) |
+| updatedAt | Long | Timestamp de modificación (epoch ms) |
+
+### Esquema de Category
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| id | String | Identificador único (UUID) |
+| name | String | Nombre de la categoría |
+| color | Int | Color ARGB (ej: 0xFFFF5722) |
+| icon | String | Icono de Font Awesome |
+| isCustom | Boolean | true = creada por usuario |
+| isDeletable | Boolean | false = predefinida |
+
+### Esquema de Settings
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| key | String | Clave de configuración |
+| value | String | Valor almacenado |
+| updatedAt | Long | Timestamp de actualización |
+
+**Claves disponibles**:
+- `theme_mode` - Modo de tema (0=Auto, 1=Light, 2=Dark)
+- `biometric_enabled` - Biometría activada (true/false)
+- `lock_timeout` - Timeout de auto-bloqueo en minutos
+
+---
+
+## Sistema de Seguridad
+
+### Cifrado Híbrido
+
+La aplicación utiliza un sistema de cifrado de doble capa:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│          Password Maestro del Usuario                    │
+│                    (memoria)                             │
+└─────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+            ┌─────────────────────────┐
+            │  PBKDF2-HMAC-SHA256     │
+            │  100,000 iteraciones    │
+            │  Salt: 16 bytes         │
+            └─────────────────────────┘
+                          │
+                          ▼
+            ┌─────────────────────────┐
+            │   Clave Derivada        │
+            │   (256 bits / 32 bytes) │
+            └─────────────────────────┘
+                          │
+          ┌───────────────┴───────────────┐
+          ▼                               ▼
+┌─────────────────────────┐   ┌─────────────────────────┐
+│   RSA-2048 (Keystore)   │   │   AES-256-GCM           │
+│   Cifra la clave        │   │   Cifra los datos       │
+│   Requiere biometría    │   │   IV: 12 bytes          │
+│   para descifrar        │   │   Tag: 128 bits         │
+└─────────────────────────┘   └─────────────────────────┘
+          │                               │
+          ▼                               ▼
+┌─────────────────────────┐   ┌─────────────────────────┐
+│  SecureStorage          │   │  Room Database          │
+│  - salt (Base64)        │   │  - password (cifrado)   │
+│  - encrypted_key (RSA)  │   │  - notes (cifrado)      │
+└─────────────────────────┘   └─────────────────────────┘
+```
+
+### Algoritmos Criptográficos
+
+| Componente | Algoritmo | Parámetros | Propósito |
+|------------|-----------|------------|-----------|
+| Derivación | PBKDF2-HMAC-SHA256 | 100,000 iteraciones | Crear clave del password |
+| Cifrado Clave | RSA-2048-PKCS1 | Keystore hardware-backed | Proteger clave maestra |
+| Cifrado Datos | AES-256-GCM | IV 12 bytes, Tag 128 bits | Cifrar contraseñas |
+| Autenticación | BiometricPrompt | BIOMETRIC_STRONG | Desbloquear Keystore |
+
+### Flujo de Autenticación
+
+1. **Setup Inicial**:
+   - Usuario crea password maestro
+   - Se genera salt aleatorio (16 bytes)
+   - Se deriva clave con PBKDF2 (100,000 iteraciones)
+   - Se genera par RSA en Keystore
+   - Se cifra clave derivada con RSA (clave pública)
+   - Se guarda salt + clave cifrada en SecureStorage
+
+2. **Login**:
+   - Usuario ingresa password
+   - Se deriva clave con el salt almacenado
+   - Se solicita autenticación biométrica
+   - Se descifra clave almacenada (RSA, clave privada)
+   - Se comparan claves (derivada vs descifrada)
+   - Si coinciden → sesión iniciada
+
+3. **Cifrado de Datos**:
+   - Cada password/nota se cifra individualmente
+   - Se genera IV único por operación (12 bytes)
+   - Se usa AES-256-GCM (confidencialidad + autenticidad)
+   - Resultado: IV + ciphertext + tag
+
+### Protección contra Ataques
+
+| Ataque | Mitigación |
+|--------|------------|
+| Fuerza bruta | PBKDF2 100,000 iteraciones (lento) |
+| Rainbow tables | Salt único aleatorio por usuario |
+| Extracción física | AES-256-GCM con tag de autenticación |
+| Extracción de claves | Android Keystore (hardware-backed) |
+| Replay attacks | IV único aleatorio por operación |
+| Modificación de datos | GCM tag detecta alteraciones |
+| Shoulder surfing | AutoLockManager (bloqueo por inactividad) |
+
+---
+
+## ViewModels Disponibles
+
+| ViewModel | Responsabilidad | Estados Clave |
+|-----------|-----------------|---------------|
+| `AuthViewModel` | Login, setup, biometría | `LoginState` |
+| `PasswordListViewModel` | Lista, búsqueda, favoritos | `PasswordListState` |
+| `PasswordDetailViewModel` | Detalle, copiado | `PasswordDetailState` |
+| `PasswordFormViewModel` | Crear/editar entrada | `PasswordFormState` |
+| `PasswordGeneratorViewModel` | Generar contraseña | `PasswordGeneratorState` |
+| `CategoryManagementViewModel` | CRUD categorías | `CategoryManagementState` |
+| `SettingsViewModel` | Configuración app | `SettingsState` |
+| `BackupViewModel` | Exportar/importar | `BackupState` |
+| `AuditViewModel` | Auditoría seguridad | `AuditState` |
+| `StatisticsViewModel` | Estadísticas | `StatisticsState` |
+| `ChangePasswordViewModel` | Cambiar password maestro | `ChangePasswordState` |
+
+---
+
+## Pantallas de la Aplicación
+
+| Pantalla | Ruta | Descripción |
+|----------|------|-------------|
+| `LoginScreen` | `/login` | Autenticación con password/biometría |
+| `OnboardingScreen` | `/onboarding` | Setup inicial (3 pasos) |
+| `HomeScreen` | `/home` | Menú principal (grid 7 opciones) |
+| `PasswordListScreen` | `/password_list` | Lista con búsqueda y filtros |
+| `PasswordDetailScreen` | `/password_detail/{id}` | Detalle con botones de copiado |
+| `PasswordFormScreen` | `/password_form` | Crear/editar entrada |
+| `PasswordGeneratorScreen` | `/password_generator` | Generador con opciones |
+| `CategoryManagementScreen` | `/category_management` | CRUD categorías |
+| `SettingsScreen` | `/settings` | Configuración general |
+| `BackupScreen` | `/backup` | Exportar/importar datos |
+| `AuditScreen` | `/audit` | Detección de passwords débiles |
+| `StatisticsScreen` | `/statistics` | Métricas de seguridad |
+| `ChangePasswordScreen` | `/change_password` | Cambiar password maestro |
+
+---
 
 ## Índice Completo
 
