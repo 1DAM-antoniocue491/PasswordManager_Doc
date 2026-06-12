@@ -1,68 +1,64 @@
-# Tabla de Contenidos - Password Manager
+# Documentación Password Manager
 
 ## Introducción
 
-* [Password Manager - Documentación](README.md)
+* [Inicio](README.md)
+* [Arquitectura](arquitectura/overview.md)
 
-## Arquitectura
+## Capas
 
-* [Visión General](arquitectura/overview.md)
-
-## Capa de Datos
-
-* [Visión General](data/overview.md)
-
-## Capa de Dominio
-
-* [Visión General](domain/overview.md)
-
-## Capa de Presentación
-
-* [Visión General](presentation/overview.md)
-* [Navegación](presentation/navigation.md)
-* [Tema](presentation/theme.md)
-
-## Pantallas
-
-* [Visión General](screens/overview.md)
-* [LoginScreen](screens/login.md)
-* [HomeScreen](screens/home.md)
-* [PasswordListScreen](screens/password-list.md)
-* [PasswordDetailScreen](screens/password-detail.md)
-* [PasswordFormScreen](screens/password-form.md)
-* [PasswordGeneratorScreen](screens/password-generator.md)
-* [CategoryManagementScreen](screens/category-management.md)
-* [SettingsScreen](screens/settings.md)
-* [BackupScreen](screens/backup.md)
-* [AuditScreen](screens/audit.md)
-* [StatisticsScreen](screens/statistics.md)
-* [OnboardingScreen](screens/onboarding.md)
-* [ChangePasswordScreen](screens/change-password.md)
-
-## Componentes
-
-* [Visión General](components/overview.md)
-* [SearchBar](components/search-bar.md)
-* [CategoryPicker](components/category-picker.md)
-* [CategoryDropdown](components/category-picker.md#categorydropdown-variante)
-* [ColorPickerDialog](components/color-picker.md)
-* [PasswordGeneratorWidget](components/password-generator-widget.md)
-
-## ViewModels
-
-* [Visión General](viewmodels/overview.md)
-* [Estados de UI](viewmodels/states.md)
+* [Dominio](domain/overview.md)
+  * [Modelos](domain/models.md)
+  * [Repositorios](domain/repositories.md)
+  * [Casos de Uso](domain/usecases.md)
+* [Datos](data/overview.md)
+  * [Base de Datos](data/database.md)
+  * [DAOs](data/dao.md)
+  * [Repositorios](data/repositories.md)
+  * [Seguridad](data/security.md)
+* [Presentación](presentation/overview.md)
+  * [Pantallas](presentation/screens.md)
+  * [Componentes](presentation/components.md)
+  * [ViewModels](presentation/viewmodels.md)
+  * [Tema](presentation/theme.md)
+  * [Navegación](presentation/navigation.md)
 
 ## Seguridad
 
-* [Visión General](security/overview.md)
+* [Seguridad](security/overview.md)
 
 ## Inyección de Dependencias
 
-* [Visión General](di/overview.md)
+* [DI con Koin](di/overview.md)
+  * [Módulos](di/modules.md)
+  * [Uso](di/usage.md)
 
-## Anexos
+## ViewModels
 
-* [Glosario de Términos](glossary.md)
-* [Referencias Externas](references.md)
-* [Historial de Cambios](changelog.md)
+* [Overview](viewmodels/overview.md)
+* [Estados](viewmodels/states.md)
+
+## Componentes
+
+* [Overview](components/overview.md)
+* [SearchBar](components/search-bar.md)
+* [CategoryPicker](components/category-picker.md)
+* [ColorPicker](components/color-picker.md)
+* [PasswordGeneratorWidget](components/password-generator-widget.md)
+
+## Pantallas
+
+* [Overview](screens/overview.md)
+* [Login](screens/login.md)
+* [Home](screens/home.md)
+* [PasswordList](screens/password-list.md)
+* [PasswordDetail](screens/password-detail.md)
+* [PasswordForm](screens/password-form.md)
+* [PasswordGenerator](screens/password-generator.md)
+* [CategoryManagement](screens/category-management.md)
+* [Settings](screens/settings.md)
+* [Backup](screens/backup.md)
+* [Audit](screens/audit.md)
+* [Statistics](screens/statistics.md)
+* [Onboarding](screens/onboarding.md)
+* [ChangePassword](screens/change-password.md)
